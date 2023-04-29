@@ -1,13 +1,36 @@
-import random
+import datetime
 import numpy as np
 import pickle
-from hex_engine import HexPosition
 import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
-from copy import deepcopy
+from hex_engine import HexPosition
+from q_learning_agent import QLearningAgent
 from mcts import MCTS
+from copy import deepcopy
+from sklearn.model_selection import train_test_split
+
+
+class HexAgent:
+    def __init__(self, board_size):
+        self.board_size = board_size
+        self.hex_cnn = HexCNN(board_size)
+
+    def generate_gameplays(self, num_games, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
+        return generate_gameplays(num_games, self.board_size, mcts_iterations, mcts_max_iterations, mcts_timeout)
+
+    def prepare_data(self, gameplays, player):
+        return prepare_data(gameplays, self.board_size, player)
+
+    def train_model(self, X, Y, epochs=10, batch_size=16):
+        train_model(X, Y, self.hex_cnn, epochs, batch_size)
+
+    def save_model(self, model_path):
+        torch.save(self.hex_cnn.state_dict(), model_path)
+
+    def load_model(self, model_path):
+        self.hex_cnn.load_state_dict(torch.load(model_path))
 
 
 def get_winning_path(board):
@@ -33,6 +56,8 @@ def get_average_winning_path(gameplays, player):
 
 
 def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
+    q_agent = QLearningAgent(board_size=size ** 2, lr=0.1, gamma=0.99, epsilon=0.1)
+    q_agent.load("q_agent")
     gameplays = []
     switch_players_every = 10
     for i in range(num_games):
@@ -50,7 +75,7 @@ def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=
                 hex_position.move(action)
                 gameplay.append(deepcopy(hex_position.board))
             else:
-                hex_position.move(random.choice(hex_position.get_action_space()))
+                hex_position.move(q_agent.choose_action(hex_position.get_action_space()))
                 gameplay.append(deepcopy(hex_position.board))
 
             if hex_position.winner != 0:
@@ -127,11 +152,13 @@ class HexCNN(nn.Module):
         return num_features
 
 
-def train_model(X, Y, model, epochs=10, batch_size=16):
+def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, validation_split=0.2):
     criterion = nn.BCELoss()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-    num_samples = len(X)
+    X_train, X_val, Y_train, Y_val = train_test_split(X, Y, test_size=validation_split, random_state=42)
+
+    num_samples = len(X_train)
 
     if num_samples < batch_size:
         batch_size = num_samples
@@ -145,14 +172,17 @@ def train_model(X, Y, model, epochs=10, batch_size=16):
 
     num_batches = num_samples // batch_size
 
+    best_val_loss = float("inf")
+    rounds_since_best_val_loss = 0
+
     for epoch in range(epochs):
         running_loss = 0.0
+        model.train()
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
             end_idx = min((batch_idx + 1) * batch_size, num_samples)
-            x_batch, y_batch = X[start_idx:end_idx], Y[start_idx:end_idx]
+            x_batch, y_batch = X_train[start_idx:end_idx], Y_train[start_idx:end_idx]
 
-            # Convert numpy arrays to tensors
             x_batch = torch.tensor(x_batch, dtype=torch.float32)
             y_batch = torch.tensor(y_batch, dtype=torch.float32)
 
@@ -166,34 +196,34 @@ def train_model(X, Y, model, epochs=10, batch_size=16):
             running_loss += loss.item()
 
         epoch_loss = running_loss / num_batches
-        print(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
 
+        model.eval()
+        X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
+        Y_val_tensor = torch.tensor(Y_val, dtype=torch.float32)
+        val_outputs = model(X_val_tensor)
+        val_loss = criterion(val_outputs, Y_val_tensor).item()
 
-def select_gameplays_based_on_threshold(gameplays, threshold_ratio):
-    avg_winning_path_white = get_average_winning_path(gameplays, 1)
-    avg_winning_path_black = get_average_winning_path(gameplays, -1)
-    threshold_white = threshold_ratio * avg_winning_path_white
-    threshold_black = threshold_ratio * avg_winning_path_black
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            rounds_since_best_val_loss = 0
+        else:
+            rounds_since_best_val_loss += 1
 
-    selected_gameplays_white = [gameplay for gameplay in gameplays if len(get_winning_path(gameplay[1])) >= 6 and len(get_winning_path(gameplay[1])) <= threshold_white]
-    selected_gameplays_black = [gameplay for gameplay in gameplays if len(get_winning_path(gameplay[-1])) >= 6 and len(get_winning_path(gameplay[-1])) <= threshold_black]
+        print(f"Epoch {epoch + 1}, Train Loss: {epoch_loss:.4f}, Validation Loss: {val_loss:.4f}")
 
-    return selected_gameplays_white, selected_gameplays_black
+        if rounds_since_best_val_loss >= early_stopping_rounds:
+            print(f"Early stopping triggered at epoch {epoch + 1}")
+            break
 
 
 if __name__ == "__main__":
     board_size = 7
     gameplay_count = 20
 
-    # Generate and save gameplays to file
-    print("Generating gameplays...")
-    with open('gameplays.pkl', 'wb') as f:
-        pickle.dump(generate_gameplays(gameplay_count, board_size, mcts_max_iterations=100, mcts_timeout=0.1), f)
+    hex_agent = HexAgent(board_size)
 
-    # Load gameplays from file
-    print("Loading gameplays...")
-    with open('gameplays.pkl', 'rb') as f:
-        gameplays = pickle.load(f)
+    print("Generating gameplays...")
+    gameplays = hex_agent.generate_gameplays(gameplay_count, board_size, mcts_max_iterations=100, mcts_timeout=0.1)
 
     # Calculate average winning paths for white and black players
     print("Calculating average winning paths...")
@@ -205,15 +235,31 @@ if __name__ == "__main__":
 
     # Separate gameplays won by white and black players
     gameplays_won_by_white = [gameplay for gameplay, winner in gameplays if winner == 1]
+    print(f"Gameplays won by white: {len(gameplays_won_by_white)}")
+
     gameplays_won_by_black = [gameplay for gameplay, winner in gameplays if winner == -1]
+    print(f"Gameplays won by black: {len(gameplays_won_by_black)}")
 
     # Select gameplays with winning paths significantly better than the average
     print("Selecting gameplays based on threshold...")
+
     selected_gameplays_white = [gameplay for gameplay in gameplays_won_by_white if
                                 threshold * avg_winning_path_white >= len(get_winning_path(gameplay[-1]))]
 
     selected_gameplays_black = [gameplay for gameplay in gameplays_won_by_black if
                                 threshold * avg_winning_path_black >= len(get_winning_path(gameplay[1]))]
+
+    now = datetime.datetime.now()
+
+    # Format the date and time as a string
+    timestamp = now.strftime("%Y%m%d%H%M%S")
+
+    # Save gameplays to file
+    with open(f'gameplays_black{timestamp}.pkl', 'wb') as f:
+        pickle.dump(selected_gameplays_white, f)
+
+    with open(f'gameplays_white{timestamp}.pkl', 'wb') as f:
+        pickle.dump(selected_gameplays_black, f)
 
     hex_cnn = HexCNN(board_size)
 
