@@ -59,33 +59,31 @@ def get_average_winning_path(gameplays, player):
 def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
     q_agent = QLearningAgent(board_size=size ** 2, lr=0.1, gamma=0.99, epsilon=0.1)
 
-    # Update the load path to check if the file exists before loading
     q_agent_file = Path("q_agent")
     if q_agent_file.is_file():
         q_agent.load("q_agent")
 
-    gameplays = []
+    unique_gameplays = set()
 
-    for i in range(num_games):
-        print(f"Generating gameplay {i + 1} out of {num_games}")
+    while len(unique_gameplays) < num_games:
+        print(f"Generating gameplay {len(unique_gameplays) + 1} out of {num_games}")
         hex_position = HexPosition(size=size)
         mcts = MCTS(hex_position, n_simulations=mcts_iterations, max_iterations=mcts_max_iterations)
         gameplay = [deepcopy(hex_position.board)]
 
-        # Change player order every 5 episodes
-        if i % 5 == 0:
+        if len(unique_gameplays) % 5 == 0:
             player_order = -1
         else:
             player_order = 1
 
         while hex_position.winner == 0:
-            if hex_position.player == player_order:  # Use MCTS for the current player
-                action = mcts.run(timeout=mcts_timeout)  # Pass the timeout here
+            if hex_position.player == player_order:
+                action = mcts.run(timeout=mcts_timeout)
                 hex_position.move(action)
                 gameplay.append(deepcopy(hex_position.board))
                 if hex_position.winner != 0:
                     break
-            else:  # Use Q-Learning agent for the other player
+            else:
                 q_action = q_agent.choose_action(hex_position.get_action_space())
                 hex_position.move(q_action)
                 gameplay.append(deepcopy(hex_position.board))
@@ -95,11 +93,13 @@ def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=
         elif hex_position.winner == -player_order:
             q_agent.update(hex_position, q_action, 10)
 
-        gameplays.append((deepcopy(gameplay), hex_position.winner))
+        hashable_gameplay = pickle.dumps((deepcopy(gameplay), hex_position.winner))
+        unique_gameplays.add(hashable_gameplay)
         hex_position.reset()
 
     q_agent.save("q_agent")
 
+    gameplays = [pickle.loads(gameplay) for gameplay in unique_gameplays]
     return gameplays
 
 
