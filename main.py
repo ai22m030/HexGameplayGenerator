@@ -75,14 +75,22 @@ def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=
                 hex_position.move(action)
                 gameplay.append(deepcopy(hex_position.board))
             else:
-                hex_position.move(q_agent.choose_action(hex_position.get_action_space()))
+                q_action = q_agent.choose_action(hex_position.get_action_space())
+                hex_position.move(q_action)
                 gameplay.append(deepcopy(hex_position.board))
+
+            if mcts_player == hex_position.winner:
+                q_agent.update(hex_position, q_action, -10)
+            elif mcts_player == hex_position.winner * -1:
+                q_agent.update(hex_position, q_action, 10)
 
             if hex_position.winner != 0:
                 break
 
         gameplays.append((deepcopy(gameplay), hex_position.winner))
         hex_position.reset()
+
+    q_agent.save("q_agent")
 
     return gameplays
 
@@ -218,7 +226,7 @@ def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, v
 
 if __name__ == "__main__":
     board_size = 7
-    gameplay_count = 20
+    gameplay_count = 1000000
 
     hex_agent = HexAgent(board_size)
 
