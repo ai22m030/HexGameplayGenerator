@@ -10,6 +10,7 @@ from q_learning_agent import QLearningAgent
 from mcts import MCTS
 from copy import deepcopy
 from sklearn.model_selection import train_test_split
+from pathlib import Path
 
 
 class HexAgent:
@@ -57,35 +58,42 @@ def get_average_winning_path(gameplays, player):
 
 def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
     q_agent = QLearningAgent(board_size=size ** 2, lr=0.1, gamma=0.99, epsilon=0.1)
-    q_agent.load("q_agent")
+
+    # Update the load path to check if the file exists before loading
+    q_agent_file = Path("q_agent")
+    if q_agent_file.is_file():
+        q_agent.load("q_agent")
+
     gameplays = []
-    switch_players_every = 10
+
     for i in range(num_games):
         print(f"Generating gameplay {i + 1} out of {num_games}")
         hex_position = HexPosition(size=size)
         mcts = MCTS(hex_position, n_simulations=mcts_iterations, max_iterations=mcts_max_iterations)
         gameplay = [deepcopy(hex_position.board)]
 
-        first_player = 1 if (i // switch_players_every) % 2 == 0 else -1
-        mcts_player = first_player
+        # Change player order every 5 episodes
+        if i % 5 == 0:
+            player_order = -1
+        else:
+            player_order = 1
 
         while hex_position.winner == 0:
-            if mcts_player == hex_position.player:
+            if hex_position.player == player_order:  # Use MCTS for the current player
                 action = mcts.run(timeout=mcts_timeout)  # Pass the timeout here
                 hex_position.move(action)
                 gameplay.append(deepcopy(hex_position.board))
-            else:
+                if hex_position.winner != 0:
+                    break
+            else:  # Use Q-Learning agent for the other player
                 q_action = q_agent.choose_action(hex_position.get_action_space())
                 hex_position.move(q_action)
                 gameplay.append(deepcopy(hex_position.board))
 
-            if mcts_player == hex_position.winner:
-                q_agent.update(hex_position, q_action, -10)
-            elif mcts_player == hex_position.winner * -1:
-                q_agent.update(hex_position, q_action, 10)
-
-            if hex_position.winner != 0:
-                break
+        if hex_position.winner == player_order:
+            q_agent.update(hex_position, q_action, -10)
+        elif hex_position.winner == -player_order:
+            q_agent.update(hex_position, q_action, 10)
 
         gameplays.append((deepcopy(gameplay), hex_position.winner))
         hex_position.reset()
@@ -225,8 +233,12 @@ def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, v
 
 
 if __name__ == "__main__":
+    # Board size
     board_size = 7
-    gameplay_count = 1000000
+    # Samples to generate
+    gameplay_count = 10000
+    # Define a threshold for selecting significantly better gameplays (e.g., 0.75 = 75% of the average)
+    threshold = 0.60
 
     hex_agent = HexAgent(board_size)
 
@@ -234,12 +246,8 @@ if __name__ == "__main__":
     gameplays = hex_agent.generate_gameplays(gameplay_count, board_size, mcts_max_iterations=100, mcts_timeout=0.1)
 
     # Calculate average winning paths for white and black players
-    print("Calculating average winning paths...")
     avg_winning_path_white = get_average_winning_path(gameplays, 1)
     avg_winning_path_black = get_average_winning_path(gameplays, -1)
-
-    # Define a threshold for selecting significantly better gameplays (e.g., 0.75 = 75% of the average)
-    threshold = 0.75
 
     # Separate gameplays won by white and black players
     gameplays_won_by_white = [gameplay for gameplay, winner in gameplays if winner == 1]
@@ -247,9 +255,6 @@ if __name__ == "__main__":
 
     gameplays_won_by_black = [gameplay for gameplay, winner in gameplays if winner == -1]
     print(f"Gameplays won by black: {len(gameplays_won_by_black)}")
-
-    # Select gameplays with winning paths significantly better than the average
-    print("Selecting gameplays based on threshold...")
 
     selected_gameplays_white = [gameplay for gameplay in gameplays_won_by_white if
                                 threshold * avg_winning_path_white >= len(get_winning_path(gameplay[-1]))]
@@ -263,15 +268,26 @@ if __name__ == "__main__":
     timestamp = now.strftime("%Y%m%d%H%M%S")
 
     # Save gameplays to file
-    with open(f'gameplays_black{timestamp}.pkl', 'wb') as f:
+    with open(f'gameplays_white_{timestamp}.pkl', 'wb') as f:
         pickle.dump(selected_gameplays_white, f)
 
-    with open(f'gameplays_white{timestamp}.pkl', 'wb') as f:
+    with open(f'gameplays_black_{timestamp}.pkl', 'wb') as f:
         pickle.dump(selected_gameplays_black, f)
 
     hex_cnn = HexCNN(board_size)
 
-    print("Preparing data for white player...")
+    hex_cnn_file = Path("hex_cnn")
+    if hex_cnn_file.is_file():
+        print("CNN model loading...")
+        hex_cnn = torch.load("hex_cnn.pth")
+
+    # Load gameplays from file
+    with open(f'gameplays_white_{timestamp}.pkl', 'rb') as f:
+        selected_gameplays_white = pickle.load(f)
+
+    with open(f'gameplays_black_{timestamp}.pkl', 'rb') as f:
+        selected_gameplays_black = pickle.load(f)
+
     if len(selected_gameplays_white) > 0:
         X_white, Y_white = prepare_data(selected_gameplays_white, board_size, 1)
         print(f"Number of selected gameplays for white player: {len(selected_gameplays_white)}")
@@ -283,7 +299,6 @@ if __name__ == "__main__":
     else:
         print("No gameplays were selected for the white player.")
 
-    print("Preparing data for black player...")
     if len(selected_gameplays_black) > 0:
         X_black, Y_black = prepare_data(selected_gameplays_black, board_size, -1)
         print(f"Number of selected gameplays for black player: {len(selected_gameplays_black)}")
@@ -295,6 +310,5 @@ if __name__ == "__main__":
     else:
         print("No gameplays were selected for the black player.")
 
-    print("Saving the trained model...")
     torch.save(hex_cnn.state_dict(), "hex_cnn.pth")
-    print("Model saved!")
+    print("CNN model saved!")
