@@ -103,6 +103,7 @@ def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=
         else:
             player_order = 1
 
+        q_action = None  # Initialize q_action with a default value before the loop starts
         while hex_position.winner == 0:
             if hex_position.player == player_order:
                 action = mcts.run(timeout=mcts_timeout)
@@ -115,10 +116,14 @@ def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=
                 hex_position.move(q_action)
                 gameplay.append(deepcopy(hex_position.board))
 
+            player_order *= -1
+
         if hex_position.winner == player_order:
-            q_agent.update(hex_position, q_action, -10)
+            if q_action is not None:
+                q_agent.update(hex_position, q_action, -10)
         elif hex_position.winner == -player_order:
-            q_agent.update(hex_position, q_action, 10)
+            if q_action is not None:
+                q_agent.update(hex_position, q_action, 10)
         hashable_gameplay = pickle.dumps((deepcopy(gameplay), hex_position.winner))
         unique_gameplays[hashable_gameplay] = (deepcopy(gameplay), hex_position.winner)
         hex_position.reset()
@@ -166,15 +171,10 @@ class HexCNN(nn.Module):
         self.pool = nn.MaxPool2d(2, 2)
         self.conv2 = nn.Conv2d(6, 16, 3)
         self.conv3 = nn.Conv2d(16, 32, 3, padding=1)
-        self.fc = nn.Linear(32, board_size * board_size)
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = x.view(-1, self.num_flat_features(x))
-        x = torch.sigmoid(self.fc(x))
-        return x
+        self.conv4 = nn.Conv2d(32, 64, 3, padding=1)
+        fc_input_size = self.calculate_fc_input_size()
+        self.fc1 = nn.Linear(fc_input_size, 512)
+        self.fc2 = nn.Linear(512, board_size * board_size)
 
     def num_flat_features(self, x):
         size = x.size()[1:]
@@ -182,6 +182,22 @@ class HexCNN(nn.Module):
         for s in size:
             num_features *= s
         return num_features
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        x = F.relu(self.conv4(x))
+        x = x.view(-1, self.num_flat_features(x))
+        x = F.relu(self.fc1(x))
+        x = torch.sigmoid(self.fc2(x))
+        return x
+
+    def calculate_fc_input_size(self):
+        size = self.board_size - 4  # Adjust for conv1 and conv2 without padding
+        size = size - 2  # Adjust for conv3 with padding=1
+        size = size - 2  # Adjust for conv4 with padding=1
+        return 64 * size * size
 
 
 def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, validation_split=0.2):
@@ -250,13 +266,13 @@ def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, v
 
 if __name__ == "__main__":
     board_size = 7
-    gameplay_count = 200
-    threshold = 0.8
+    gameplay_count = 100
+    threshold = 0.7
 
     hex_agent = HexAgent(board_size)
 
     print("Generating gameplays...")
-    gameplays = hex_agent.generate_gameplays(gameplay_count, board_size, mcts_max_iterations=100, mcts_timeout=0.1)
+    gameplays = hex_agent.generate_gameplays(gameplay_count, board_size, mcts_max_iterations=200, mcts_timeout=0.5)
 
     # Calculate average winning paths for white and black players
     avg_winning_path_white = get_average_winning_path(gameplays, 1)
