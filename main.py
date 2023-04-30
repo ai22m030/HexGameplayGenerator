@@ -240,8 +240,8 @@ def plot_cumulative_rewards(cumulative_rewards, num_games):
 
 if __name__ == "__main__":
     board_size = 7
-    gameplay_count = 10
-    threshold = 0.7
+    gameplay_count = 10000
+    threshold = 0.6
 
     hex_agent = HexAgent(board_size)
 
