@@ -1,11 +1,10 @@
-import datetime
 import numpy as np
 import pickle
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
 from hex_engine import HexPosition
+from hex_learning import HexCNN, get_average_winning_path, get_winning_path, write_plays, load_plays
 from q_learning_agent import QLearningAgent
 from mcts import MCTS
 from copy import deepcopy
@@ -15,15 +14,15 @@ import matplotlib.pyplot as plt
 
 
 class HexAgent:
-    def __init__(self, board_size):
-        self.board_size = board_size
-        self.hex_cnn = HexCNN(board_size)
+    def __init__(self, size):
+        self.board_size = size
+        self.hex_cnn = HexCNN(size)
 
-    def generate_gameplays(self, num_games, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
-        return generate_gameplays(num_games, self.board_size, mcts_iterations, mcts_max_iterations, mcts_timeout)
+    def generate_game_plays(self, num_games, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
+        return generate_plays(num_games, self.board_size, mcts_iterations, mcts_max_iterations, mcts_timeout)
 
-    def prepare_data(self, gameplays, player):
-        return prepare_data(gameplays, self.board_size, player)
+    def prepare_data(self, plays, player):
+        return prepare_data(plays, self.board_size, player)
 
     def train_model(self, X, Y, epochs=10, batch_size=16):
         train_model(X, Y, self.hex_cnn, epochs, batch_size)
@@ -35,71 +34,24 @@ class HexAgent:
         self.hex_cnn.load_state_dict(torch.load(model_path))
 
 
-def get_winning_path(board, player):
-    size = len(board)
-    visited = set()
-
-    def dfs(x, y):
-        if x < 0 or x >= size or y < 0 or y >= size or board[x][y] != player or (x, y) in visited:
-            return []
-        if (player == 1 and y == size - 1) or (player == -1 and x == size - 1):
-            return [(x, y)]
-
-        visited.add((x, y))
-        adjacents = [(x - 1, y), (x - 1, y + 1), (x, y - 1), (x, y + 1), (x + 1, y), (x + 1, y - 1)]
-
-        for a, b in adjacents:
-            path = dfs(a, b)
-            if path:
-                return [(x, y)] + path
-
-        return []
-
-    if player == 1:
-        for i in range(size):
-            path = dfs(i, 0)
-            if path:
-                return path
-    elif player == -1:
-        for j in range(size):
-            path = dfs(0, j)
-            if path:
-                return path
-    return []
-
-
-def get_average_winning_path(gameplays, player):
-    winning_path_lengths = [len(get_winning_path(gameplay[player], player)) for gameplay, winner in gameplays if
-                            winner == player]
-    return np.mean(winning_path_lengths)
-
-
-def write_gameplays(name, gameplays):
-    with open(f'{name}_{datetime.datetime.now().strftime("%Y%m%d%H%M")}.pkl', 'wb') as f:
-        pickle.dump(gameplays, f)
-
-
-def load_gameplays(name):
-    with open(f'{name}_{datetime.datetime.now().strftime("%Y%m%d%H%M")}.pkl', 'rb') as f:
-        return pickle.load(f)
-
-
-def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
+def generate_plays(num_games, size, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
     q_agent = QLearningAgent(board_size=size ** 2, lr=0.1, gamma=0.99, epsilon=0.1)
 
     q_agent_file = Path("q_agent")
     if q_agent_file.is_file():
         q_agent.load("q_agent")
 
-    unique_gameplays = {}
+    unique_plays = {}
+    win_counts = {'white': 0, 'black': 0}
+    rates = []
 
-    while len(unique_gameplays) < num_games:
-        print(f"Generating gameplay {len(unique_gameplays) + 1} out of {num_games}")
+    while len(unique_plays) < num_games:
+        print(f"Generating gameplay {len(unique_plays) + 1} out of {num_games}")
         hex_position = HexPosition(size=size)
         mcts = MCTS(hex_position, n_simulations=mcts_iterations, max_iterations=mcts_max_iterations)
         gameplay = [deepcopy(hex_position.board)]
 
-        if len(unique_gameplays) % 5 == 0:
+        if len(unique_plays) % 5 == 0:
             player_order = -1
         else:
             player_order = 1
@@ -122,25 +74,28 @@ def generate_gameplays(num_games, size, mcts_iterations=10, mcts_max_iterations=
         if hex_position.winner == player_order:
             if q_action is not None:
                 q_agent.update(hex_position, q_action, -10)
+            win_counts['black'] += 1
         elif hex_position.winner == -player_order:
             if q_action is not None:
                 q_agent.update(hex_position, q_action, 10)
+            win_counts['white'] += 1
         hashable_gameplay = pickle.dumps((deepcopy(gameplay), hex_position.winner))
-        unique_gameplays[hashable_gameplay] = (deepcopy(gameplay), hex_position.winner)
+        unique_plays[hashable_gameplay] = (deepcopy(gameplay), hex_position.winner)
+        rates.append(win_counts.copy())
         hex_position.reset()
     q_agent.save("q_agent")
-    gameplays = list(unique_gameplays.values())
-    return gameplays
+    plays = list(unique_plays.values())
+    return plays, rates
 
 
-def prepare_data(gameplays, board_size, player):
+def prepare_data(plays, size, player):
     X = []
     Y = []
-    for gameplay in gameplays:
-        hex_position = HexPosition(size=board_size)
+    for gameplay in plays:
+        hex_position = HexPosition(size=size)
         for i in range(0 if player == 1 else 1, len(gameplay) - 1, 2):
             if i == 0:
-                current_board = np.zeros((board_size, board_size))
+                current_board = np.zeros((size, size))
             else:
                 current_board = np.array(gameplay[i - 1])
             next_board = np.array(gameplay[i])
@@ -149,56 +104,19 @@ def prepare_data(gameplays, board_size, player):
                 X.append(gameplay[-1])
                 diff_board = next_board - current_board
                 move_coordinates = np.unravel_index(np.argmax(diff_board, axis=None), diff_board.shape)
-                y = np.zeros(board_size * board_size)
+                y = np.zeros(size * size)
                 y[hex_position.coordinate_to_scalar(tuple(move_coordinates))] = 1
                 Y.append(y)
-    X = np.array(X).reshape(-1, 1, board_size, board_size)
+    X = np.array(X).reshape(-1, 1, size, size)
     Y = np.array(Y)
     if player == -1:
         X_reversed = []
         for x in X:
-            flipped_board = HexPosition(size=board_size)
+            flipped_board = HexPosition(size=size)
             flipped_board.board = x[0]
             X_reversed.append(np.array(flipped_board.recode_black_as_white()))
-        X = np.array(X_reversed).reshape(-1, 1, board_size, board_size)
+        X = np.array(X_reversed).reshape(-1, 1, size, size)
     return X, Y
-
-
-class HexCNN(nn.Module):
-    def __init__(self, board_size):
-        super(HexCNN, self).__init__()
-        self.board_size = board_size
-        self.conv1 = nn.Conv2d(1, 6, 5)
-        self.pool = nn.MaxPool2d(2, 2)
-        self.conv2 = nn.Conv2d(6, 16, 3)
-        self.conv3 = nn.Conv2d(16, 32, 3, padding=1)
-        self.conv4 = nn.Conv2d(32, 64, 3, padding=1)
-        fc_input_size = self.calculate_fc_input_size()
-        self.fc1 = nn.Linear(fc_input_size, 512)
-        self.fc2 = nn.Linear(512, board_size * board_size)
-
-    def num_flat_features(self, x):
-        size = x.size()[1:]
-        num_features = 1
-        for s in size:
-            num_features *= s
-        return num_features
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.relu(self.conv2(x))
-        x = F.relu(self.conv3(x))
-        x = F.relu(self.conv4(x))
-        x = x.view(-1, self.num_flat_features(x))
-        x = F.relu(self.fc1(x))
-        x = torch.sigmoid(self.fc2(x))
-        return x
-
-    def calculate_fc_input_size(self):
-        size = self.board_size - 4  # Adjust for conv1 and conv2 without padding
-        size = size - 2  # Adjust for conv3 with padding=1
-        size = size - 2  # Adjust for conv4 with padding=1
-        return 64 * size * size
 
 
 def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, validation_split=0.2):
@@ -265,35 +183,57 @@ def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, v
             break
 
 
+def plot_win_rates(rates, num_games):
+    white_wins = np.array([x['white'] for x in rates])
+    black_wins = np.array([x['black'] for x in rates])
+    games_played = np.arange(1, num_games + 1)
+
+    white_win_rate = white_wins / games_played
+    black_win_rate = black_wins / games_played
+
+    plt.plot(games_played, white_win_rate, label='White')
+    plt.plot(games_played, black_win_rate, label='Black')
+
+    plt.xlabel('Game plays')
+    plt.ylabel('Cumulative Win Rate')
+    plt.title('Cumulative Win Rate Over Time')
+    plt.legend()
+
+    plt.show()
+
+
 if __name__ == "__main__":
     board_size = 7
-    gameplay_count = 100
+    gameplay_count = 1000
     threshold = 0.7
 
     hex_agent = HexAgent(board_size)
 
-    print("Generating gameplays...")
-    gameplays = hex_agent.generate_gameplays(gameplay_count, board_size, mcts_max_iterations=200, mcts_timeout=0.5)
+    print("Generating game plays...")
+    game_plays, win_rates = hex_agent.generate_game_plays(gameplay_count, board_size, mcts_max_iterations=200,
+                                                          mcts_timeout=0.5)
+
+    plot_win_rates(win_rates, gameplay_count)
 
     # Calculate average winning paths for white and black players
-    avg_winning_path_white = get_average_winning_path(gameplays, 1)
-    avg_winning_path_black = get_average_winning_path(gameplays, -1)
+    avg_winning_path_white = get_average_winning_path(game_plays, 1)
+    avg_winning_path_black = get_average_winning_path(game_plays, -1)
 
-    # Separate gameplays won by white and black players
-    gameplays_won_by_white = [gameplay for gameplay, winner in gameplays if winner == 1]
-    print(f"Gameplays won by white: {len(gameplays_won_by_white)}")
+    # Separate game plays won by white and black players
+    plays_won_by_white = [gameplay for gameplay, winner in game_plays if winner == 1]
+    print(f"Game plays won by white: {len(plays_won_by_white)}")
 
-    gameplays_won_by_black = [gameplay for gameplay, winner in gameplays if winner == -1]
-    print(f"Gameplays won by black: {len(gameplays_won_by_black)}")
+    plays_won_by_black = [gameplay for gameplay, winner in game_plays if winner == -1]
+    print(f"Game plays won by black: {len(plays_won_by_black)}")
 
-    selected_gameplays_white = [gameplay for gameplay in gameplays_won_by_white if
+    selected_gameplays_white = [gameplay for gameplay in plays_won_by_white if
                                 threshold * avg_winning_path_white >= len(get_winning_path(gameplay[-1], 1))]
-    selected_gameplays_black = [gameplay for gameplay in gameplays_won_by_black if
+    selected_gameplays_black = [gameplay for gameplay in plays_won_by_black if
                                 threshold * avg_winning_path_black >= len(get_winning_path(gameplay[-1], -1))]
 
     # Save gameplays to file
-    write_gameplays("gameplays_white", selected_gameplays_white)
-    write_gameplays("gameplays_black", selected_gameplays_black)
+    write_plays("gameplays_white", selected_gameplays_white)
+    write_plays("gameplays_black", selected_gameplays_black)
 
     hex_cnn = HexCNN(board_size)
 
@@ -303,8 +243,8 @@ if __name__ == "__main__":
         hex_cnn = torch.load("hex_cnn.pth")
 
     # Load gameplays from file
-    selected_gameplays_white = load_gameplays('gameplays_white')
-    selected_gameplays_black = load_gameplays('gameplays_black')
+    selected_gameplays_white = load_plays('gameplays_white')
+    selected_gameplays_black = load_plays('gameplays_black')
 
     if len(selected_gameplays_white) > 0:
         X_white, Y_white = prepare_data(selected_gameplays_white, board_size, 1)
