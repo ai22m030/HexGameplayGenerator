@@ -44,6 +44,8 @@ def generate_plays(num_games, size, mcts_iterations=10, mcts_max_iterations=100,
     unique_plays = {}
     win_counts = {'white': 0, 'black': 0}
     rates = []
+    cumulative_rewards = []
+    total_reward = 0
 
     while len(unique_plays) < num_games:
         print(f"Generating gameplay {len(unique_plays) + 1} out of {num_games}")
@@ -73,25 +75,29 @@ def generate_plays(num_games, size, mcts_iterations=10, mcts_max_iterations=100,
 
         if hex_position.winner == player_order:
             if q_action is not None:
-                q_agent.update(hex_position, q_action, -10)
+                reward = -10
+                q_agent.update(hex_position, q_action, reward)
             win_counts['black'] += 1
         elif hex_position.winner == -player_order:
             if q_action is not None:
-                q_agent.update(hex_position, q_action, 10)
+                reward = 10
+                q_agent.update(hex_position, q_action, reward)
             win_counts['white'] += 1
+        total_reward += reward
+        cumulative_rewards.append(total_reward)
         hashable_gameplay = pickle.dumps((deepcopy(gameplay), hex_position.winner))
         unique_plays[hashable_gameplay] = (deepcopy(gameplay), hex_position.winner)
         rates.append(win_counts.copy())
         hex_position.reset()
     q_agent.save("q_agent")
     plays = list(unique_plays.values())
-    return plays, rates
+    return plays, rates, cumulative_rewards
 
 
 def prepare_data(plays, size, player):
     X = []
     Y = []
-    for gameplay in plays:
+    for gameplay, winner in plays:
         hex_position = HexPosition(size=size)
         for i in range(0 if player == 1 else 1, len(gameplay) - 1, 2):
             if i == 0:
@@ -142,6 +148,9 @@ def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, v
     best_val_loss = float("inf")
     rounds_since_best_val_loss = 0
 
+    train_losses = []
+    val_losses = []
+
     for epoch in range(epochs):
         running_loss = 0.0
         model.train()
@@ -163,12 +172,14 @@ def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, v
             running_loss += loss.item()
 
         epoch_loss = running_loss / num_batches
+        train_losses.append(epoch_loss)
 
         model.eval()
         X_val_tensor = torch.tensor(X_val, dtype=torch.float32)
         Y_val_tensor = torch.tensor(Y_val, dtype=torch.float32)
         val_outputs = model(X_val_tensor)
         val_loss = criterion(val_outputs, Y_val_tensor).item()
+        val_losses.append(val_loss)
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -181,6 +192,8 @@ def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, v
         if rounds_since_best_val_loss >= early_stopping_rounds:
             print(f"Early stopping triggered at epoch {epoch + 1}")
             break
+
+    plot_losses(train_losses, val_losses, epoch + 1)
 
 
 def plot_win_rates(rates, num_games):
@@ -202,18 +215,42 @@ def plot_win_rates(rates, num_games):
     plt.show()
 
 
+def plot_losses(train_losses, val_losses, epochs):
+    plt.plot(range(1, epochs + 1), train_losses, label='Training Loss')
+    plt.plot(range(1, epochs + 1), val_losses, label='Validation Loss')
+
+    plt.xlabel('Epochs')
+    plt.ylabel('Loss')
+    plt.title('Training and Validation Losses')
+    plt.legend()
+
+    plt.show()
+
+
+def plot_cumulative_rewards(cumulative_rewards, num_games):
+    plt.plot(range(1, num_games + 1), cumulative_rewards, label='Cumulative Rewards')
+
+    plt.xlabel('Game plays')
+    plt.ylabel('Cumulative Rewards')
+    plt.title('Q-learning Agent Improvement')
+    plt.legend()
+
+    plt.show()
+
+
 if __name__ == "__main__":
     board_size = 7
-    gameplay_count = 1000
+    gameplay_count = 10
     threshold = 0.7
 
     hex_agent = HexAgent(board_size)
 
     print("Generating game plays...")
-    game_plays, win_rates = hex_agent.generate_game_plays(gameplay_count, board_size, mcts_max_iterations=200,
-                                                          mcts_timeout=0.5)
+    game_plays, win_rates, cumulative_rewards = hex_agent.generate_game_plays(gameplay_count, board_size,
+                                                                              mcts_max_iterations=100, mcts_timeout=0.3)
 
     plot_win_rates(win_rates, gameplay_count)
+    plot_cumulative_rewards(cumulative_rewards, gameplay_count)
 
     # Calculate average winning paths for white and black players
     avg_winning_path_white = get_average_winning_path(game_plays, 1)
