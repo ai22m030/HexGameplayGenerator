@@ -11,6 +11,7 @@ from mcts import MCTS
 from copy import deepcopy
 from sklearn.model_selection import train_test_split
 from pathlib import Path
+import matplotlib.pyplot as plt
 
 
 class HexAgent:
