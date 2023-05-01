@@ -100,7 +100,7 @@ def prepare_data(hex_position, plays, board_size, player):
     Y = []
 
     for play in plays:
-        gameplay, _ = play  # Unpack the tuple here
+        gameplay = play  # Don't unpack the tuple
 
         for i in range(len(gameplay) - 1):
             current_board = np.zeros((board_size, board_size))
@@ -238,7 +238,7 @@ def plot_cumulative_rewards(cumulative_rewards, num_games):
 
 if __name__ == "__main__":
     board_size = 7
-    gameplay_count = 20
+    gameplay_count = 2
     threshold = 0.8
 
     hex_agent = HexAgent(board_size)
