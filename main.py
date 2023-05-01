@@ -100,7 +100,7 @@ def prepare_data(hex_position, plays, board_size, player):
     Y = []
 
     for play in plays:
-        gameplay = play[0]
+        gameplay, _ = play  # Unpack the tuple here
 
         for i in range(len(gameplay) - 1):
             current_board = np.zeros((board_size, board_size))
