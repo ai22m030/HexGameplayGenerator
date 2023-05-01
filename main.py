@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.optim as optim
 from hex_engine import HexPosition
 from hex_learning import HexCNN, get_average_winning_path, get_winning_path, write_plays, load_plays
-from q_learning_agent import QLearningAgent
+from q_learning_agent import QLearningAgent, EpsilonGreedyActionSelector
 from mcts import MCTS
 from copy import deepcopy
 from sklearn.model_selection import train_test_split
@@ -35,7 +35,8 @@ class HexAgent:
 
 
 def generate_plays(num_games, size, mcts_iterations=10, mcts_max_iterations=100, mcts_timeout=0.1):
-    q_agent = QLearningAgent(board_size=size ** 2, lr=0.1, gamma=0.99, epsilon=0.1)
+    selector = EpsilonGreedyActionSelector(0.1)
+    q_agent = QLearningAgent(board_size=size ** 2, lr=0.1, gamma=0.99, action_selector=selector)
 
     q_agent_file = Path("q_agent")
     if q_agent_file.is_file():

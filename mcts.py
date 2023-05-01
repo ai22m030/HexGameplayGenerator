@@ -17,8 +17,9 @@ class Node:
         child.parent = self
         self.children.append(child)
 
-    def uct(self):
-        return (self.wins / self.visits) + math.sqrt(2 * math.log(self.parent.visits) / self.visits)
+    def uct(self, exploration_coefficient=1):
+        return (self.wins / self.visits) + exploration_coefficient * math.sqrt(
+            2 * math.log(self.parent.visits) / self.visits)
 
     def fully_expanded(self):
         unexpanded_moves = set(self.state.get_action_space()) - set(child.last_move for child in self.children)
@@ -31,16 +32,7 @@ class Node:
         if not self.children:
             return None
 
-        best_value = float('-inf')
-        best_child = None
-
-        for child in self.children:
-            value = (child.wins / child.visits) + exploration_coefficient * math.sqrt(
-                2 * math.log(self.visits) / child.visits)
-            if value > best_value:
-                best_value = value
-                best_child = child
-
+        best_child = max(self.children, key=lambda child: child.uct(exploration_coefficient))
         return best_child
 
 
@@ -96,13 +88,17 @@ class MCTS:
             simulation_state.move(random_action)
             if simulation_state.winner != 0:
                 break
-            simulation_state.move(choice(simulation_state.get_action_space()))
+            # Now the opponent makes a random move
+            random_action = choice(simulation_state.get_action_space())
+            simulation_state.move(random_action)
 
         return 1 if simulation_state.winner == self.hex_position.player else -1
 
     def backpropagate(self, node, reward):
         while node is not None:
             node.visits += 1
-            node.wins += reward
-            reward = -reward
+            if node.state.player == self.hex_position.player and reward == 1:
+                node.wins += 1
+            elif node.state.player != self.hex_position.player and reward == -1:
+                node.wins += 1
             node = node.parent
