@@ -100,6 +100,7 @@ def prepare_data(hex_position, plays, board_size, player):
     Y = []
 
     for play in plays:
+        print(play)
         gameplay = play  # Don't unpack the tuple
 
         for i in range(len(gameplay) - 1):
