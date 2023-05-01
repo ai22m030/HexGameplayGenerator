@@ -241,8 +241,8 @@ def plot_cumulative_rewards(cumulative_rewards, num_games):
 
 if __name__ == "__main__":
     board_size = 7
-    gameplay_count = 10000
-    threshold = 0.6
+    gameplay_count = 20
+    threshold = 0.8
 
     hex_agent = HexAgent(board_size)
 
@@ -281,8 +281,8 @@ if __name__ == "__main__":
         hex_cnn = torch.load("hex_cnn.pth")
 
     # Load gameplays from file
-    selected_gameplays_white = load_plays('gameplays_white')
-    selected_gameplays_black = load_plays('gameplays_black')
+    # selected_gameplays_white = load_plays('gameplays_white')
+    # selected_gameplays_black = load_plays('gameplays_black')
 
     if len(selected_gameplays_white) > 0:
         X_white, Y_white = prepare_data(selected_gameplays_white, board_size, 1)
