@@ -44,7 +44,7 @@ class MCTS:
         self.root = Node(state=self.hex_position)
         self.max_iterations = max_iterations
 
-    def run(self, timeout=1):
+    def run(self, timeout=1, agent=lambda x: choice(x)):
         start_time = time.time()
         iterations = 0
         while time.time() - start_time < timeout and iterations < self.max_iterations:
@@ -52,7 +52,7 @@ class MCTS:
             selected_node = self.select()
             if selected_node.state.winner == 0:
                 expanded_node = self.expand(selected_node)
-                reward = self.simulate(expanded_node)
+                reward = self.simulate(expanded_node, agent)
                 self.backpropagate(expanded_node, reward)
             else:
                 self.backpropagate(selected_node, selected_node.state.winner)
@@ -81,7 +81,7 @@ class MCTS:
         node.children.append(new_node)
         return new_node
 
-    def simulate(self, node):
+    def simulate(self, node, agent):
         simulation_state = deepcopy(node.state)
         while simulation_state.winner == 0:
             random_action = choice(simulation_state.get_action_space())
@@ -89,7 +89,7 @@ class MCTS:
             if simulation_state.winner != 0:
                 break
             # Now the opponent makes a random move
-            random_action = choice(simulation_state.get_action_space())
+            random_action = agent(simulation_state.get_action_space())
             simulation_state.move(random_action)
 
         return 1 if simulation_state.winner == self.hex_position.player else -1
@@ -102,3 +102,7 @@ class MCTS:
             elif node.state.player != self.hex_position.player and reward == -1:
                 node.wins += 1
             node = node.parent
+
+    def update_root(self, new_hex_position):
+        self.hex_position = new_hex_position
+        self.root = Node(state=self.hex_position)
