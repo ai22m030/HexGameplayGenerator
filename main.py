@@ -95,7 +95,7 @@ def generate_plays(num_games, size, mcts_iterations=10, mcts_max_iterations=100,
     return plays, rates, cumulative_rewards
 
 
-def prepare_data(plays, board_size, player):
+def prepare_data(hex_position, plays, board_size, player):
     X = []
     Y = []
 
@@ -112,6 +112,10 @@ def prepare_data(plays, board_size, player):
 
             row, col = gameplay[i + 1]
             next_board[row][col] = player if (i + 1) % 2 == 0 else -player
+
+            if player == -1:
+                current_board = hex_position.recode_black_as_white(invert_colors=True)
+                next_board = hex_position.recode_black_as_white(invert_colors=True)
 
             X.append(current_board)
             Y.append(next_board)
@@ -278,7 +282,8 @@ if __name__ == "__main__":
     # selected_gameplays_black = load_plays('gameplays_black')
 
     if len(selected_gameplays_white) > 0:
-        X_white, Y_white = prepare_data(selected_gameplays_white, board_size, 1)
+        hex_position = HexPosition(board_size)
+        X_white, Y_white = prepare_data(HexPosition(board_size), selected_gameplays_white, board_size, 1)
         if len(X_white) > 0:
             print(f"Training model for white player: {len(selected_gameplays_white)}")
             train_model(X_white, Y_white, hex_cnn)
@@ -286,7 +291,7 @@ if __name__ == "__main__":
             print("No data available for training the white player.")
 
     if len(selected_gameplays_black) > 0:
-        X_black, Y_black = prepare_data(selected_gameplays_black, board_size, -1)
+        X_black, Y_black = prepare_data(HexPosition(board_size), selected_gameplays_black, board_size, -1)
         if len(X_black) > 0:
             print(f"Training model for black player: {len(selected_gameplays_black)}")
             train_model(X_black, Y_black, hex_cnn)
