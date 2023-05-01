@@ -95,35 +95,28 @@ def generate_plays(num_games, size, mcts_iterations=10, mcts_max_iterations=100,
     return plays, rates, cumulative_rewards
 
 
-def prepare_data(plays, size, player):
+def prepare_data(plays, board_size, player):
     X = []
     Y = []
-    for gameplay, winner in plays:
-        hex_position = HexPosition(size=size)
-        for i in range(0 if player == 1 else 1, len(gameplay) - 1, 2):
-            if i == 0:
-                current_board = np.zeros((size, size))
-            else:
-                current_board = np.array(gameplay[i - 1])
-            next_board = np.array(gameplay[i])
-            hex_position.board = current_board
-            if hex_position.winner == 0:
-                X.append(gameplay[-1])
-                diff_board = next_board - current_board
-                move_coordinates = np.unravel_index(np.argmax(diff_board, axis=None), diff_board.shape)
-                y = np.zeros(size * size)
-                y[hex_position.coordinate_to_scalar(tuple(move_coordinates))] = 1
-                Y.append(y)
-    X = np.array(X).reshape(-1, 1, size, size)
-    Y = np.array(Y)
-    if player == -1:
-        X_reversed = []
-        for x in X:
-            flipped_board = HexPosition(size=size)
-            flipped_board.board = x[0]
-            X_reversed.append(np.array(flipped_board.recode_black_as_white()))
-        X = np.array(X_reversed).reshape(-1, 1, size, size)
-    return X, Y
+
+    for play in plays:
+        gameplay = play[0]
+
+        for i in range(len(gameplay) - 1):
+            current_board = np.zeros((board_size, board_size))
+            next_board = np.zeros((board_size, board_size))
+
+            for j in range(i + 1):
+                row, col = gameplay[j]
+                current_board[row][col] = player if j % 2 == 0 else -player
+
+            row, col = gameplay[i + 1]
+            next_board[row][col] = player if (i + 1) % 2 == 0 else -player
+
+            X.append(current_board)
+            Y.append(next_board)
+
+    return np.array(X), np.array(Y)
 
 
 def train_model(X, Y, model, epochs=10, batch_size=6, early_stopping_rounds=5, validation_split=0.2):
